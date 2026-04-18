@@ -57,6 +57,26 @@ jobs:
           rm -rf /tmp/osxcross/target/macports/software/*
           tar -I pbzip2 -cf /tmp/osxcross-${{ matrix.osx }}-toolchain.tar.bz2 -C /tmp/osxcross target/
 
+      - name: Audit Build Integrity
+        run: |
+          echo "--- AUDIT REPORT FOR ${{ matrix.osx }} ---"
+          SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
+          
+          # Проверяем реальный размер директории библиотек
+          du -sh "$SYSROOT/lib" || echo "Lib dir missing"
+          
+          # Проверяем, есть ли хоть что-то реальное в либах
+          # Фейковые установки часто оставляют пустые папки или вообще ничего
+          if [ -d "$SYSROOT/lib" ]; then
+            find "$SYSROOT/lib" -type f | wc -l
+            find "$SYSROOT/lib" -type f | head -n 20
+          fi
+          
+          # Если есть файл логов macports, выводим последние 50 строк
+          if [ -f "/tmp/osxcross/target/macports/var/macports/logs" ]; then
+            tail -n 50 /tmp/osxcross/target/macports/var/macports/logs/* 2>/dev/null || echo "No logs found"
+          fi
+      
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
