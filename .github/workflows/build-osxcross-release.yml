@@ -1,103 +1,102 @@
-steps:
-  - name: Install System Dependencies
-    run: |
-      set -euo pipefail
-      sudo apt-get update
-      sudo apt-get install -y --no-install-recommends \
-        clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev \
-        patch make tar xz-utils bzip2 gzip sed cpio libbz2-dev \
-        zlib1g-dev pbzip2 curl git
+name: Build OSXCross (macOS 10.13 High Sierra) Base Libs
 
-  - name: Clone OSXCross Repository
-    run: |
-      set -euo pipefail
-      git clone https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
-      cd /tmp/osxcross
-      git checkout master
+on:
+  workflow_dispatch:
 
-  - name: Download and Validate macOS SDK
-    run: |
-      set -euo pipefail
-      cd /tmp/osxcross/tarballs
-      echo "Downloading macOS ${SDK_VERSION} SDK (Pre-patched for OSXCross)..."
-      curl -fL -o MacOSX${SDK_VERSION}.sdk.tar.xz "${SDK_URL}"
-      
-      # Guard Clause: Валидация загрузки
-      if [ ! -s MacOSX${SDK_VERSION}.sdk.tar.xz ]; then
-        echo "::error::Failed to download SDK or file is empty."
-        exit 1
-      fi
-      
-      echo "${SDK_SHA256}  MacOSX${SDK_VERSION}.sdk.tar.xz" | sha256sum --check - || {
-        echo "::error::SDK SHA256 checksum mismatch. Aborting to prevent poisoned toolchain."
-        exit 1
-      }
+permissions:
+  contents: write
 
-  - name: Build OSXCross Toolchain
-    run: |
-      set -euo pipefail
-      cd /tmp/osxcross
-      ./build.sh
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+    env:
+      OSX_VERSION_MIN: "10.13"
+      SDK_VERSION: "10.13"
+      SDK_URL: "https://github.com/joseluisq/macosx-sdks/releases/download/10.13/MacOSX10.13.sdk.tar.xz"
+      SDK_SHA256: "9d3eddc34a510198694f5ec7cfbdebaee4c0c7ba68ad1d957cb566649c9a0f84"
+      UNATTENDED: "1"
+      MACOSX_DEPLOYMENT_TARGET: "10.13"
 
-      # Guard Clause: Проверка генерации бинарника
-      if [ ! -x "./target/bin/x86_64-apple-darwin17-clang" ]; then
-        echo "::error::Clang binary for x86_64-apple-darwin17 was not created. Build failed."
-        exit 1
-      fi
+    steps:
+      - name: Install System Dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev \
+            patch make tar xz-utils bzip2 gzip sed cpio libbz2-dev \
+            zlib1g-dev pbzip2 curl git
 
-  - name: Populate Toolchain with Dev Dependencies (MacPorts)
-    run: |
-      set -euo pipefail
-      export PATH="/tmp/osxcross/target/bin:$PATH"
-      
-      echo "Installing foundational C/C++ libraries via osxcross-macports..."
-      
-      # Отключаем pipefail временно, чтобы утилита 'yes' не обрушила скрипт сигналом SIGPIPE (141)
-      set +o pipefail
-      yes | osxcross-macports install \
-        pkgconfig zlib bzip2 libpng freetype fontconfig \
-        libxml2 openssl jpeg tiff x264 x265 lame opus libvpx \
-        xvid lcms2 openexr boost libsdl2
-      MACPORTS_STATUS=$?
-      set -o pipefail
-      
-      if [ $MACPORTS_STATUS -ne 0 ]; then
-        echo "::error::MacPorts package installation failed."
-        exit 1
-      fi
+      - name: Clone OSXCross Repository
+        run: |
+          set -euo pipefail
+          git clone https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
+          cd /tmp/osxcross
+          git checkout master
 
-      # Guard Clause: Проверка установки пакетов по наличию заголовочных файлов
-      SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
-      if [ ! -d "$SYSROOT/include/openssl" ] || [ ! -d "$SYSROOT/include/boost" ]; then
-        echo "::error::Critical libraries (OpenSSL or Boost) are missing in MacPorts sysroot."
-        exit 1
-      fi
+      - name: Download and Validate macOS SDK
+        run: |
+          set -euo pipefail
+          cd /tmp/osxcross/tarballs
+          curl -fL -o MacOSX${SDK_VERSION}.sdk.tar.xz "${SDK_URL}"
+          
+          if [ ! -s MacOSX${SDK_VERSION}.sdk.tar.xz ]; then
+            echo "::error::Failed to download SDK or file is empty."
+            exit 1
+          fi
+          
+          echo "${SDK_SHA256}  MacOSX${SDK_VERSION}.sdk.tar.xz" | sha256sum --check - || {
+            echo "::error::SDK SHA256 checksum mismatch."
+            exit 1
+          }
 
-  - name: Sanitize and Compress Toolchain
-    run: |
-      set -euo pipefail
-      cd /tmp/osxcross
-      
-      # Очистка мусора MacPorts
-      rm -rf target/macports/software/*
-      
-      # Упаковка
-      tar -I pbzip2 -cf /tmp/osxcross-10.13-toolchain.tar.bz2 target/
-      
-      # Guard Clause: Защита от публикации пустого архива
-      if [ ! -s /tmp/osxcross-10.13-toolchain.tar.bz2 ]; then
-        echo "::error::Final archive is empty or missing."
-        exit 1
-      fi
+      - name: Build OSXCross Toolchain
+        run: |
+          set -euo pipefail
+          cd /tmp/osxcross
+          ./build.sh
+          if [ ! -x "./target/bin/x86_64-apple-darwin17-clang" ]; then
+            echo "::error::Clang binary not found."
+            exit 1
+          fi
 
-  - name: Create GitHub Release and Upload
-    uses: softprops/action-gh-release@v2
-    with:
-      tag_name: "10.13-build-${{ github.run_number }}"
-      name: "OSXCross High Sierra (10.13) Base Libs (Build ${{ github.run_number }})"
-      body: |
-        Self-contained OSXCross toolchain for macOS 10.13 (High Sierra).
-        Includes pre-compiled MacPorts C/C++ dependencies for media frameworks.
-      files: /tmp/osxcross-10.13-toolchain.tar.bz2
-      draft: false
-      prerelease: false
+      - name: Populate Toolchain with Dev Dependencies (MacPorts)
+        run: |
+          set -euo pipefail
+          export PATH="/tmp/osxcross/target/bin:$PATH"
+          
+          # Установка переменных для сессии macports
+          export MACOSX_DEPLOYMENT_TARGET=${OSX_VERSION_MIN}
+          
+          echo "Installing foundational C/C++ libraries..."
+          
+          # Используем команду без set +o pipefail, передавая yes корректно
+          yes | osxcross-macports install \
+            pkgconfig zlib bzip2 libpng freetype fontconfig \
+            libxml2 openssl jpeg tiff x264 x265 lame opus libvpx \
+            xvid lcms2 openexr boost libsdl2
+          
+          # Guard Clause: Проверка установки пакетов
+          SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
+          if [[ ! -d "$SYSROOT/include/openssl" || ! -d "$SYSROOT/include/boost" ]]; then
+            echo "::error::Critical libraries (OpenSSL or Boost) are missing in MacPorts sysroot."
+            exit 1
+          fi
+
+      - name: Sanitize and Compress Toolchain
+        run: |
+          set -euo pipefail
+          cd /tmp/osxcross
+          rm -rf target/macports/software/*
+          tar -I pbzip2 -cf /tmp/osxcross-10.13-toolchain.tar.bz2 target/
+          if [ ! -s /tmp/osxcross-10.13-toolchain.tar.bz2 ]; then
+            echo "::error::Final archive is empty."
+            exit 1
+          fi
+
+      - name: Create GitHub Release and Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "10.13-build-${{ github.run_number }}"
+          name: "OSXCross High Sierra (10.13) Base Libs (Build ${{ github.run_number }})"
+          files: /tmp/osxcross-10.13-toolchain.tar.bz2
