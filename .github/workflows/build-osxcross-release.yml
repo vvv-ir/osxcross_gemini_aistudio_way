@@ -3,15 +3,17 @@ name: Build OSXCross (macOS 10.13 High Sierra) Base Libs
 on:
   workflow_dispatch: # Ручной запуск сборки
 
+permissions:
+  contents: write # Критически важно: выдаем права на создание релизов
+
 jobs:
   build-and-package:
     runs-on: ubuntu-latest
     env:
       OSX_VERSION_MIN: "10.13"
       SDK_VERSION: "10.13"
-      SDK_URL: "https://github.com/joseluisq/macosx-sdks/releases/download/10.13/MacOSX10.13.sdk.tar.xz"
-      SDK_SHA256: "e44dfecad51c5d51e73ea3f6050b18f0293ee0991caec116127cb4ebc529ba47"
-      # Отключаем интерактивные запросы скриптов osxcross
+      SDK_URL: "https://github.com/phracker/MacOSX-SDKs/releases/download/10.15/MacOSX10.13.sdk.tar.xz"
+      SDK_SHA256: "a3a077385205039a7c6f9e2c98ecdf2a720b2a819da715e03e0630c75782c1e4"
       UNATTENDED: "1" 
 
     steps:
@@ -35,11 +37,11 @@ jobs:
         run: |
           set -euo pipefail
           cd /tmp/osxcross/tarballs
-          echo "Downloading macOS ${SDK_VERSION} SDK..."
+          echo "Downloading macOS ${SDK_VERSION} SDK from phracker mirror..."
           curl -fL -o MacOSX${SDK_VERSION}.sdk.tar.xz "${SDK_URL}"
           
-          # Guard Clause: Проверка успешности скачивания и целостности
-          if [ ! -s MacOSX${SDK_VERSION}.sdk.tar.xz ]; then
+          # Guard Clause: Валидация загрузки
+          if[ ! -s MacOSX${SDK_VERSION}.sdk.tar.xz ]; then
             echo "::error::Failed to download SDK or file is empty."
             exit 1
           fi
@@ -55,7 +57,7 @@ jobs:
           cd /tmp/osxcross
           ./build.sh
 
-          # Guard Clause: Проверка генерации бинарников (Darwin 17 = High Sierra 10.13)
+          # Guard Clause: Проверка успешности компиляции clang враппера
           if[ ! -x "./target/bin/x86_64-apple-darwin17-clang" ]; then
             echo "::error::Clang binary for x86_64-apple-darwin17 was not created. Build failed."
             exit 1
@@ -67,9 +69,6 @@ jobs:
           export PATH="/tmp/osxcross/target/bin:$PATH"
           
           echo "Installing foundational C/C++ libraries via osxcross-macports..."
-          # Устанавливаем только библиотеки (кодеки, графику, математику) и инструменты сборки (pkgconfig)
-          # FFmpeg deps: x264, x265, lame, opus, libvpx, xvid
-          # Poppler/Blender deps: freetype, fontconfig, jpeg, tiff, lcms2, openexr, boost, sdl2
           yes | x86_64-apple-darwin17-macports install \
             pkgconfig zlib bzip2 libpng freetype fontconfig \
             libxml2 openssl jpeg tiff x264 x265 lame opus libvpx \
@@ -78,34 +77,39 @@ jobs:
               exit 1
             }
 
-          # Guard Clause: Проверка успешной линковки заголовочных файлов и библиотек в sysroot
+          # Guard Clause: Проверка установки пакетов
           SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
-          if [ ! -f "$SYSROOT/lib/libssl.dylib" ] || [ ! -d "$SYSROOT/include/boost" ]; then
+          if[ ! -f "$SYSROOT/lib/libssl.dylib" ] || [ ! -d "$SYSROOT/include/boost" ]; then
             echo "::error::Critical libraries (OpenSSL or Boost) are missing in MacPorts sysroot."
             exit 1
           fi
 
-      - name: Sanitize and Compress Artifact
+      - name: Sanitize and Compress Toolchain
         run: |
           set -euo pipefail
           cd /tmp/osxcross
           
-          # Очистка исходников и временных файлов MacPorts для минимизации веса
+          # Очистка мусора MacPorts
           rm -rf target/macports/software/*
           
-          # Упаковка готового тулчейна с использованием pbzip2 (ускорение за счет многопоточности)
+          # Упаковка
           tar -I pbzip2 -cf /tmp/osxcross-10.13-toolchain.tar.bz2 target/
           
-          # Guard Clause: Проверка итогового архива
+          # Guard Clause: Защита от публикации пустого архива
           if[ ! -s /tmp/osxcross-10.13-toolchain.tar.bz2 ]; then
             echo "::error::Final archive is empty or missing."
             exit 1
           fi
 
-      - name: Upload Toolchain Artifact
-        uses: actions/upload-artifact@v4
+      - name: Create GitHub Release and Upload
+        uses: softprops/action-gh-release@v2
         with:
-          name: osxcross-10.13-toolchain
-          path: /tmp/osxcross-10.13-toolchain.tar.bz2
-          retention-days: 30
-          if-no-files-found: error
+          # Автоматическая генерация тега (например, 10.13-build-42)
+          tag_name: "10.13-build-${{ github.run_number }}"
+          name: "OSXCross High Sierra (10.13) Base Libs (Build ${{ github.run_number }})"
+          body: |
+            Self-contained OSXCross toolchain for macOS 10.13 (High Sierra).
+            Includes pre-compiled MacPorts C/C++ dependencies for media frameworks.
+          files: /tmp/osxcross-10.13-toolchain.tar.bz2
+          draft: false
+          prerelease: false
