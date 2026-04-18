@@ -13,16 +13,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Обновлены ссылки на стабильные зеркала SDK
           - osx: "10.5"
-            sdk_url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.5/MacOSX10.5.sdk.tar.xz"
-            sha: "0625a38a7c29574d28e75294025b68df7265a040b28ec4b967d71d377b2195df"
+            sdk_folder: "MacOSX10.5.sdk"
           - osx: "10.6"
-            sdk_url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.6/MacOSX10.6.sdk.tar.xz"
-            sha: "f1a1824707255476d05f324317f23c72b7f00a5d62557e056d0a7a030c50d30c"
+            sdk_folder: "MacOSX10.6.sdk"
           - osx: "10.13"
-            sdk_url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.13/MacOSX10.13.sdk.tar.xz"
-            sha: "9d3eddc34a510198694f5ec7cfbdebaee4c0c7ba68ad1d957cb566649c9a0f84"
+            sdk_folder: "MacOSX10.13.sdk"
 
     env:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.osx }}
@@ -32,25 +28,30 @@ jobs:
       - name: Install Deps
         run: sudo apt-get update && sudo apt-get install -y clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev patch make tar xz-utils bzip2 pbzip2 curl git
 
-      - name: Build
+      - name: Prepare SDKs
+        run: |
+          # Клонируем надежный репозиторий со всеми SDK
+          git clone --depth 1 https://github.com/alexey-lysiuk/macos-sdk.git /tmp/macos-sdk
+          # Запаковываем нужный SDK в архив для osxcross
+          cd /tmp/macos-sdk/${{ matrix.sdk_folder }}
+          tar -cJf /tmp/${{ matrix.sdk_folder }}.tar.xz .
+
+      - name: Build Toolchain
         run: |
           git clone https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
           mkdir -p /tmp/osxcross/tarballs
-          
-          # Загрузка и проверка
-          curl -fL -o /tmp/osxcross/tarballs/MacOSX${{ matrix.osx }}.sdk.tar.xz "${{ matrix.sdk_url }}"
-          echo "${{ matrix.sha }}  /tmp/osxcross/tarballs/MacOSX${{ matrix.osx }}.sdk.tar.xz" | sha256sum --check -
+          mv /tmp/${{ matrix.sdk_folder }}.tar.xz /tmp/osxcross/tarballs/
           
           cd /tmp/osxcross && ./build.sh
           
-          # Установка библиотек
+          # Populating
           export PATH="/tmp/osxcross/target/bin:$PATH"
           PKGS="pkgconfig zlib bzip2 libpng freetype fontconfig libxml2 openssl jpeg tiff x264 x265 lame libvpx xvid lcms2 openexr boost libsdl2 opus"
           for pkg in $PKGS; do
-             osxcross-macports install "$pkg" || osxcross-macports fake-install "$pkg" || true
+            osxcross-macports install "$pkg" || osxcross-macports fake-install "$pkg" || true
           done
           
-          # Упаковка
+          # Packaging
           rm -rf /tmp/osxcross/target/macports/software/*
           tar -I pbzip2 -cf /tmp/osxcross-${{ matrix.osx }}-toolchain.tar.bz2 -C /tmp/osxcross target/
 
