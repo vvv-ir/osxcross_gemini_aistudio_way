@@ -40,7 +40,7 @@ jobs:
           echo "Downloading macOS ${SDK_VERSION} SDK (Pre-patched for OSXCross)..."
           curl -fL -o MacOSX${SDK_VERSION}.sdk.tar.xz "${SDK_URL}"
           
-          # Guard Clause: Валидация загрузки
+          # Guard Clause: Валидация загрузки (синтаксис строго POSIX)
           if[ ! -s MacOSX${SDK_VERSION}.sdk.tar.xz ]; then
             echo "::error::Failed to download SDK or file is empty."
             exit 1
@@ -57,7 +57,7 @@ jobs:
           cd /tmp/osxcross
           ./build.sh
 
-          # Guard Clause: Проверка успешности компиляции clang враппера (исправлен синтаксис)
+          # Guard Clause: Проверка успешности компиляции clang враппера
           if[ ! -x "./target/bin/x86_64-apple-darwin17-clang" ]; then
             echo "::error::Clang binary for x86_64-apple-darwin17 was not created. Build failed."
             exit 1
@@ -77,7 +77,7 @@ jobs:
               exit 1
             }
 
-          # Guard Clause: Проверка установки пакетов (исправлен синтаксис)
+          # Guard Clause: Проверка установки пакетов
           SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
           if[ ! -f "$SYSROOT/lib/libssl.dylib" ] || [ ! -d "$SYSROOT/include/boost" ]; then
             echo "::error::Critical libraries (OpenSSL or Boost) are missing in MacPorts sysroot."
@@ -95,7 +95,7 @@ jobs:
           # Упаковка
           tar -I pbzip2 -cf /tmp/osxcross-10.13-toolchain.tar.bz2 target/
           
-          # Guard Clause: Защита от публикации пустого архива (исправлен синтаксис)
+          # Guard Clause: Защита от публикации пустого архива
           if[ ! -s /tmp/osxcross-10.13-toolchain.tar.bz2 ]; then
             echo "::error::Final archive is empty or missing."
             exit 1
