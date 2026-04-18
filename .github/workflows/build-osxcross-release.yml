@@ -28,74 +28,47 @@ jobs:
       UNATTENDED: "1"
 
     steps:
-      #- name: Install Deps
-      #  run: sudo apt-get update && sudo apt-get install -y clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev patch make tar xz-utils bzip2 pbzip2 curl git
+      - name: Install System Dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev patch make tar xz-utils bzip2 pbzip2 curl git
 
-      - name: Populate Dependencies
+      - name: Build Toolchain and Dependencies
         run: |
-          export PATH="/tmp/osxcross/target/bin:$PATH"
-          cd /tmp/osxcross
+          set -euo pipefail
           
-          # Если версия старая, используем минимальный набор
-          if [[ "${{ matrix.osx }}" == "10.5" || "${{ matrix.osx }}" == "10.6" ]]; then
-            echo "Old macOS detected: Skipping macports (not supported), manually installing minimal headers."
-            # Здесь можно добавить ручную установку zlib/openssl через osxcross-build
-            osxcross-build zlib || true
-            osxcross-build openssl || true
-          else
-            # Для 10.7+ продолжаем использовать macports
+          # 1. Подготовка
+          git clone --depth 1 https://github.com/alexey-lysiuk/macos-sdk.git /tmp/macos-sdk
+          git clone -b ${{ matrix.branch }} https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
+          mkdir -p /tmp/osxcross/tarballs
+          tar -cJf /tmp/osxcross/tarballs/${{ matrix.sdk_dir }}.tar.xz -C /tmp/macos-sdk ${{ matrix.sdk_dir }}
+          
+          # 2. Сборка
+          cd /tmp/osxcross
+          ./build.sh
+          
+          # 3. Зависимости
+          export PATH="/tmp/osxcross/target/bin:$PATH"
+          if [[ "${{ matrix.osx }}" != "10.5" && "${{ matrix.osx }}" != "10.6" ]]; then
             PKGS="pkgconfig zlib bzip2 libpng freetype fontconfig libxml2 openssl jpeg tiff x264 x265 lame libvpx xvid lcms2 openexr boost libsdl2 opus"
             for pkg in $PKGS; do
               osxcross-macports install "$pkg" || osxcross-macports fake-install "$pkg" || true
             done
           fi
-      
-      - name: Prepare SDK and Build
-        run: |
-          # 1. Получение SDK из надежного источника
-          git clone --depth 1 https://github.com/alexey-lysiuk/macos-sdk.git /tmp/macos-sdk
           
-          # 2. Подготовка OSXCross
-          git clone -b ${{ matrix.branch }} https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
-          mkdir -p /tmp/osxcross/tarballs
-          
-          # 3. Создание архива в формате, который ожидает build.sh
-          tar -cJf /tmp/osxcross/tarballs/${{ matrix.sdk_dir }}.tar.xz -C /tmp/macos-sdk ${{ matrix.sdk_dir }}
-          
-          # 4. Сборка тулчейна
-          cd /tmp/osxcross && ./build.sh
-          
-          # 5. Установка библиотек
-          export PATH="/tmp/osxcross/target/bin:$PATH"
-          PKGS="pkgconfig zlib bzip2 libpng freetype fontconfig libxml2 openssl jpeg tiff x264 x265 lame libvpx xvid lcms2 openexr boost libsdl2 opus"
-          for pkg in $PKGS; do
-            osxcross-macports install "$pkg" || osxcross-macports fake-install "$pkg" || true
-          done
-          
-          # 6. Упаковка
-          rm -rf /tmp/osxcross/target/macports/software/*
-          tar -I pbzip2 -cf /tmp/osxcross-${{ matrix.osx }}-toolchain.tar.bz2 -C /tmp/osxcross target/
-
-      - name: Audit Build Integrity
-        run: |
+          # 4. Аудит (логи в CI)
           echo "--- AUDIT REPORT FOR ${{ matrix.osx }} ---"
           SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
-          
-          # Проверяем реальный размер директории библиотек
-          du -sh "$SYSROOT/lib" || echo "Lib dir missing"
-          
-          # Проверяем, есть ли хоть что-то реальное в либах
-          # Фейковые установки часто оставляют пустые папки или вообще ничего
           if [ -d "$SYSROOT/lib" ]; then
-            find "$SYSROOT/lib" -type f | wc -l
-            find "$SYSROOT/lib" -type f | head -n 20
+             echo "Libraries found:"
+             find "$SYSROOT/lib" -maxdepth 1 -name "*.a" -o -name "*.dylib" | wc -l
+             ls -lh "$SYSROOT/lib" | head -n 20
+          else
+             echo "No MacPorts libs found (normal for legacy SDKs)"
           fi
           
-          # Если есть файл логов macports, выводим последние 50 строк
-          if [ -f "/tmp/osxcross/target/macports/var/macports/logs" ]; then
-            tail -n 50 /tmp/osxcross/target/macports/var/macports/logs/* 2>/dev/null || echo "No logs found"
-          fi
-      
+          # 5. Упаковка
+          rm -rf target/macports/software/*
+          tar -I pbzip2 -cf /tmp/osxcross-${{ matrix.osx }}-toolchain.tar.bz2 -C /tmp/osxcross target/
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
