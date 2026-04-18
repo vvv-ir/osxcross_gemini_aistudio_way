@@ -12,8 +12,10 @@ jobs:
     env:
       OSX_VERSION_MIN: "10.13"
       SDK_VERSION: "10.13"
-      SDK_URL: "https://github.com/phracker/MacOSX-SDKs/releases/download/10.15/MacOSX10.13.sdk.tar.xz"
-      SDK_SHA256: "a3a077385205039a7c6f9e2c98ecdf2a720b2a819da715e03e0630c75782c1e4"
+      # Возвращаем пропатченный специально для OSXCross SDK
+      SDK_URL: "https://github.com/joseluisq/macosx-sdks/releases/download/10.13/MacOSX10.13.sdk.tar.xz"
+      # Подлинная хеш-сумма из официального реестра joseluisq
+      SDK_SHA256: "9d3eddc34a510198694f5ec7cfbdebaee4c0c7ba68ad1d957cb566649c9a0f84"
       UNATTENDED: "1" 
 
     steps:
@@ -37,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           cd /tmp/osxcross/tarballs
-          echo "Downloading macOS ${SDK_VERSION} SDK from phracker mirror..."
+          echo "Downloading macOS ${SDK_VERSION} SDK (Pre-patched for OSXCross)..."
           curl -fL -o MacOSX${SDK_VERSION}.sdk.tar.xz "${SDK_URL}"
           
           # Guard Clause: Валидация загрузки
@@ -79,7 +81,7 @@ jobs:
 
           # Guard Clause: Проверка установки пакетов
           SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
-          if [ ! -f "$SYSROOT/lib/libssl.dylib" ] ||[ ! -d "$SYSROOT/include/boost" ]; then
+          if[ ! -f "$SYSROOT/lib/libssl.dylib" ] || [ ! -d "$SYSROOT/include/boost" ]; then
             echo "::error::Critical libraries (OpenSSL or Boost) are missing in MacPorts sysroot."
             exit 1
           fi
