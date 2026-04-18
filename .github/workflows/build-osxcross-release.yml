@@ -28,9 +28,28 @@ jobs:
       UNATTENDED: "1"
 
     steps:
-      - name: Install Deps
-        run: sudo apt-get update && sudo apt-get install -y clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev patch make tar xz-utils bzip2 pbzip2 curl git
+      #- name: Install Deps
+      #  run: sudo apt-get update && sudo apt-get install -y clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev patch make tar xz-utils bzip2 pbzip2 curl git
 
+      - name: Populate Dependencies
+        run: |
+          export PATH="/tmp/osxcross/target/bin:$PATH"
+          cd /tmp/osxcross
+          
+          # Если версия старая, используем минимальный набор
+          if [[ "${{ matrix.osx }}" == "10.5" || "${{ matrix.osx }}" == "10.6" ]]; then
+            echo "Old macOS detected: Skipping macports (not supported), manually installing minimal headers."
+            # Здесь можно добавить ручную установку zlib/openssl через osxcross-build
+            osxcross-build zlib || true
+            osxcross-build openssl || true
+          else
+            # Для 10.7+ продолжаем использовать macports
+            PKGS="pkgconfig zlib bzip2 libpng freetype fontconfig libxml2 openssl jpeg tiff x264 x265 lame libvpx xvid lcms2 openexr boost libsdl2 opus"
+            for pkg in $PKGS; do
+              osxcross-macports install "$pkg" || osxcross-macports fake-install "$pkg" || true
+            done
+          fi
+      
       - name: Prepare SDK and Build
         run: |
           # 1. Получение SDK из надежного источника
