@@ -31,41 +31,27 @@ jobs:
       - name: Install System Dependencies
         run: sudo apt-get update && sudo apt-get install -y clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev patch make tar xz-utils bzip2 pbzip2 curl git
 
-      - name: Build Toolchain and Dependencies
+      - name: Build Toolchain
         run: |
           set -euo pipefail
-          
-          # 1. Подготовка
           git clone --depth 1 https://github.com/alexey-lysiuk/macos-sdk.git /tmp/macos-sdk
           git clone -b ${{ matrix.branch }} https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
           mkdir -p /tmp/osxcross/tarballs
           tar -cJf /tmp/osxcross/tarballs/${{ matrix.sdk_dir }}.tar.xz -C /tmp/macos-sdk ${{ matrix.sdk_dir }}
           
-          # 2. Сборка
           cd /tmp/osxcross
           ./build.sh
           
-          # 3. Зависимости
-          export PATH="/tmp/osxcross/target/bin:$PATH"
-          if [[ "${{ matrix.osx }}" != "10.5" && "${{ matrix.osx }}" != "10.6" ]]; then
-            PKGS="pkgconfig zlib bzip2 libpng freetype fontconfig libxml2 openssl jpeg tiff x264 x265 lame libvpx xvid lcms2 openexr boost libsdl2 opus"
+          # Установка библиотек ТОЛЬКО для 10.13
+          if [[ "${{ matrix.osx }}" == "10.13" ]]; then
+            export PATH="/tmp/osxcross/target/bin:$PATH"
+            PKGS="zlib bzip2 libpng freetype libxml2 openssl jpeg tiff x264 x265 lame opus"
             for pkg in $PKGS; do
               osxcross-macports install "$pkg" || osxcross-macports fake-install "$pkg" || true
             done
           fi
           
-          # 4. Аудит (логи в CI)
-          echo "--- AUDIT REPORT FOR ${{ matrix.osx }} ---"
-          SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
-          if [ -d "$SYSROOT/lib" ]; then
-             echo "Libraries found:"
-             find "$SYSROOT/lib" -maxdepth 1 -name "*.a" -o -name "*.dylib" | wc -l
-             ls -lh "$SYSROOT/lib" | head -n 20
-          else
-             echo "No MacPorts libs found (normal for legacy SDKs)"
-          fi
-          
-          # 5. Упаковка
+          # Очистка и упаковка
           rm -rf target/macports/software/*
           tar -I pbzip2 -cf /tmp/osxcross-${{ matrix.osx }}-toolchain.tar.bz2 -C /tmp/osxcross target/
 
