@@ -14,11 +14,14 @@ jobs:
       matrix:
         include:
           - osx: "10.5"
-            sdk_folder: "MacOSX10.5.sdk"
+            branch: "osxcross-1.1"
+            sdk_url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.5/MacOSX10.5.sdk.tar.xz"
           - osx: "10.6"
-            sdk_folder: "MacOSX10.6.sdk"
+            branch: "osxcross-1.1"
+            sdk_url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.6/MacOSX10.6.sdk.tar.xz"
           - osx: "10.13"
-            sdk_folder: "MacOSX10.13.sdk"
+            branch: "master"
+            sdk_url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.13/MacOSX10.13.sdk.tar.xz"
 
     env:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.osx }}
@@ -28,19 +31,21 @@ jobs:
       - name: Install Deps
         run: sudo apt-get update && sudo apt-get install -y clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev patch make tar xz-utils bzip2 pbzip2 curl git
 
-      - name: Prepare SDKs
+      - name: Build
         run: |
-          # Клонируем надежный репозиторий со всеми SDK
-          git clone --depth 1 https://github.com/alexey-lysiuk/macos-sdk.git /tmp/macos-sdk
-          # Запаковываем нужный SDK в архив для osxcross
-          cd /tmp/macos-sdk/${{ matrix.sdk_folder }}
-          tar -cJf /tmp/${{ matrix.sdk_folder }}.tar.xz .
-
-      - name: Build Toolchain
-        run: |
-          git clone https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
+          # Клонируем нужную ветку
+          git clone -b ${{ matrix.branch }} https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
           mkdir -p /tmp/osxcross/tarballs
-          mv /tmp/${{ matrix.sdk_folder }}.tar.xz /tmp/osxcross/tarballs/
+          
+          # Загрузка
+          curl -fL -o /tmp/osxcross/tarballs/MacOSX${{ matrix.osx }}.sdk.tar.xz "${{ matrix.sdk_url }}"
+          
+          # Распаковка SDK для проверки структуры
+          cd /tmp/osxcross/tarballs
+          tar -xf MacOSX${{ matrix.osx }}.sdk.tar.xz
+          # Если tar создала подпапку, перемещаем содержимое в tarballs/
+          # Это предотвращает ошибку 'mv: cannot stat' в build.sh
+          find . -maxdepth 2 -type d -name "*.sdk" -exec mv {} . \;
           
           cd /tmp/osxcross && ./build.sh
           
@@ -69,7 +74,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
