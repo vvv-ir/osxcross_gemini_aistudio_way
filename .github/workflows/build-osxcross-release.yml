@@ -1,0 +1,111 @@
+name: Build OSXCross (macOS 10.13 High Sierra) Base Libs
+
+on:
+  workflow_dispatch: # Ручной запуск сборки
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+    env:
+      OSX_VERSION_MIN: "10.13"
+      SDK_VERSION: "10.13"
+      SDK_URL: "https://github.com/joseluisq/macosx-sdks/releases/download/10.13/MacOSX10.13.sdk.tar.xz"
+      SDK_SHA256: "e44dfecad51c5d51e73ea3f6050b18f0293ee0991caec116127cb4ebc529ba47"
+      # Отключаем интерактивные запросы скриптов osxcross
+      UNATTENDED: "1" 
+
+    steps:
+      - name: Install System Dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev \
+            patch make tar xz-utils bzip2 gzip sed cpio libbz2-dev \
+            zlib1g-dev pbzip2 curl git
+
+      - name: Clone OSXCross Repository
+        run: |
+          set -euo pipefail
+          git clone https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
+          cd /tmp/osxcross
+          git checkout master
+
+      - name: Download and Validate macOS SDK
+        run: |
+          set -euo pipefail
+          cd /tmp/osxcross/tarballs
+          echo "Downloading macOS ${SDK_VERSION} SDK..."
+          curl -fL -o MacOSX${SDK_VERSION}.sdk.tar.xz "${SDK_URL}"
+          
+          # Guard Clause: Проверка успешности скачивания и целостности
+          if [ ! -s MacOSX${SDK_VERSION}.sdk.tar.xz ]; then
+            echo "::error::Failed to download SDK or file is empty."
+            exit 1
+          fi
+          
+          echo "${SDK_SHA256}  MacOSX${SDK_VERSION}.sdk.tar.xz" | sha256sum --check - || {
+            echo "::error::SDK SHA256 checksum mismatch. Aborting to prevent poisoned toolchain."
+            exit 1
+          }
+
+      - name: Build OSXCross Toolchain
+        run: |
+          set -euo pipefail
+          cd /tmp/osxcross
+          ./build.sh
+
+          # Guard Clause: Проверка генерации бинарников (Darwin 17 = High Sierra 10.13)
+          if[ ! -x "./target/bin/x86_64-apple-darwin17-clang" ]; then
+            echo "::error::Clang binary for x86_64-apple-darwin17 was not created. Build failed."
+            exit 1
+          fi
+
+      - name: Populate Toolchain with Dev Dependencies (MacPorts)
+        run: |
+          set -euo pipefail
+          export PATH="/tmp/osxcross/target/bin:$PATH"
+          
+          echo "Installing foundational C/C++ libraries via osxcross-macports..."
+          # Устанавливаем только библиотеки (кодеки, графику, математику) и инструменты сборки (pkgconfig)
+          # FFmpeg deps: x264, x265, lame, opus, libvpx, xvid
+          # Poppler/Blender deps: freetype, fontconfig, jpeg, tiff, lcms2, openexr, boost, sdl2
+          yes | x86_64-apple-darwin17-macports install \
+            pkgconfig zlib bzip2 libpng freetype fontconfig \
+            libxml2 openssl jpeg tiff x264 x265 lame opus libvpx \
+            xvid lcms2 openexr boost libsdl2 || {
+              echo "::error::MacPorts package installation failed."
+              exit 1
+            }
+
+          # Guard Clause: Проверка успешной линковки заголовочных файлов и библиотек в sysroot
+          SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
+          if [ ! -f "$SYSROOT/lib/libssl.dylib" ] || [ ! -d "$SYSROOT/include/boost" ]; then
+            echo "::error::Critical libraries (OpenSSL or Boost) are missing in MacPorts sysroot."
+            exit 1
+          fi
+
+      - name: Sanitize and Compress Artifact
+        run: |
+          set -euo pipefail
+          cd /tmp/osxcross
+          
+          # Очистка исходников и временных файлов MacPorts для минимизации веса
+          rm -rf target/macports/software/*
+          
+          # Упаковка готового тулчейна с использованием pbzip2 (ускорение за счет многопоточности)
+          tar -I pbzip2 -cf /tmp/osxcross-10.13-toolchain.tar.bz2 target/
+          
+          # Guard Clause: Проверка итогового архива
+          if[ ! -s /tmp/osxcross-10.13-toolchain.tar.bz2 ]; then
+            echo "::error::Final archive is empty or missing."
+            exit 1
+          fi
+
+      - name: Upload Toolchain Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: osxcross-10.13-toolchain
+          path: /tmp/osxcross-10.13-toolchain.tar.bz2
+          retention-days: 30
+          if-no-files-found: error
