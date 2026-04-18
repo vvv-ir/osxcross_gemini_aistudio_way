@@ -13,17 +13,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Обновлены ссылки на стабильные зеркала SDK
           - osx: "10.5"
-            sdk: "10.5"
-            url: "https://github.com/phracker/MacOSX-SDKs/releases/download/MacOSX10.5.sdk/MacOSX10.5.sdk.tar.xz"
-            sha: "9312384a60f994793f41249b809a47d25e0e118991218df8ba5f0709f6e52c8b"
+            sdk_url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.5/MacOSX10.5.sdk.tar.xz"
+            sha: "0625a38a7c29574d28e75294025b68df7265a040b28ec4b967d71d377b2195df"
           - osx: "10.6"
-            sdk: "10.6"
-            url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.6/MacOSX10.6.sdk.tar.xz"
+            sdk_url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.6/MacOSX10.6.sdk.tar.xz"
             sha: "f1a1824707255476d05f324317f23c72b7f00a5d62557e056d0a7a030c50d30c"
           - osx: "10.13"
-            sdk: "10.13"
-            url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.13/MacOSX10.13.sdk.tar.xz"
+            sdk_url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.13/MacOSX10.13.sdk.tar.xz"
             sha: "9d3eddc34a510198694f5ec7cfbdebaee4c0c7ba68ad1d957cb566649c9a0f84"
 
     env:
@@ -38,16 +36,21 @@ jobs:
         run: |
           git clone https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
           mkdir -p /tmp/osxcross/tarballs
-          curl -fL -o /tmp/osxcross/tarballs/MacOSX${{ matrix.sdk }}.sdk.tar.xz "${{ matrix.url }}"
-          echo "${{ matrix.sha }}  /tmp/osxcross/tarballs/MacOSX${{ matrix.sdk }}.sdk.tar.xz" | sha256sum --check -
+          
+          # Загрузка и проверка
+          curl -fL -o /tmp/osxcross/tarballs/MacOSX${{ matrix.osx }}.sdk.tar.xz "${{ matrix.sdk_url }}"
+          echo "${{ matrix.sha }}  /tmp/osxcross/tarballs/MacOSX${{ matrix.osx }}.sdk.tar.xz" | sha256sum --check -
+          
           cd /tmp/osxcross && ./build.sh
           
-          # Populating
+          # Установка библиотек
           export PATH="/tmp/osxcross/target/bin:$PATH"
           PKGS="pkgconfig zlib bzip2 libpng freetype fontconfig libxml2 openssl jpeg tiff x264 x265 lame libvpx xvid lcms2 openexr boost libsdl2 opus"
-          for pkg in $PKGS; do osxcross-macports install "$pkg" || osxcross-macports fake-install "$pkg" || true; done
+          for pkg in $PKGS; do
+             osxcross-macports install "$pkg" || osxcross-macports fake-install "$pkg" || true
+          done
           
-          # Packaging
+          # Упаковка
           rm -rf /tmp/osxcross/target/macports/software/*
           tar -I pbzip2 -cf /tmp/osxcross-${{ matrix.osx }}-toolchain.tar.bz2 -C /tmp/osxcross target/
 
@@ -60,8 +63,6 @@ jobs:
   release:
     needs: build-toolchain
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
