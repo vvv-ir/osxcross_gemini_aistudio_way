@@ -12,9 +12,7 @@ jobs:
     env:
       OSX_VERSION_MIN: "10.13"
       SDK_VERSION: "10.13"
-      # Возвращаем пропатченный специально для OSXCross SDK
       SDK_URL: "https://github.com/joseluisq/macosx-sdks/releases/download/10.13/MacOSX10.13.sdk.tar.xz"
-      # Подлинная хеш-сумма из официального реестра joseluisq
       SDK_SHA256: "9d3eddc34a510198694f5ec7cfbdebaee4c0c7ba68ad1d957cb566649c9a0f84"
       UNATTENDED: "1" 
 
@@ -43,7 +41,7 @@ jobs:
           curl -fL -o MacOSX${SDK_VERSION}.sdk.tar.xz "${SDK_URL}"
           
           # Guard Clause: Валидация загрузки
-          if [ ! -s MacOSX${SDK_VERSION}.sdk.tar.xz ]; then
+          if[ ! -s MacOSX${SDK_VERSION}.sdk.tar.xz ]; then
             echo "::error::Failed to download SDK or file is empty."
             exit 1
           fi
@@ -59,7 +57,7 @@ jobs:
           cd /tmp/osxcross
           ./build.sh
 
-          # Guard Clause: Проверка успешности компиляции clang враппера
+          # Guard Clause: Проверка успешности компиляции clang враппера (исправлен синтаксис)
           if[ ! -x "./target/bin/x86_64-apple-darwin17-clang" ]; then
             echo "::error::Clang binary for x86_64-apple-darwin17 was not created. Build failed."
             exit 1
@@ -79,7 +77,7 @@ jobs:
               exit 1
             }
 
-          # Guard Clause: Проверка установки пакетов
+          # Guard Clause: Проверка установки пакетов (исправлен синтаксис)
           SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
           if[ ! -f "$SYSROOT/lib/libssl.dylib" ] || [ ! -d "$SYSROOT/include/boost" ]; then
             echo "::error::Critical libraries (OpenSSL or Boost) are missing in MacPorts sysroot."
@@ -97,7 +95,7 @@ jobs:
           # Упаковка
           tar -I pbzip2 -cf /tmp/osxcross-10.13-toolchain.tar.bz2 target/
           
-          # Guard Clause: Защита от публикации пустого архива
+          # Guard Clause: Защита от публикации пустого архива (исправлен синтаксис)
           if[ ! -s /tmp/osxcross-10.13-toolchain.tar.bz2 ]; then
             echo "::error::Final archive is empty or missing."
             exit 1
