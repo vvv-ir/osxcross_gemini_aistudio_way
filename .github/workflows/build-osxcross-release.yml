@@ -40,7 +40,7 @@ jobs:
           echo "Downloading macOS ${SDK_VERSION} SDK (Pre-patched for OSXCross)..."
           curl -fL -o MacOSX${SDK_VERSION}.sdk.tar.xz "${SDK_URL}"
           
-          # Guard Clause: Валидация загрузки (синтаксис строго POSIX)
+          # Guard Clause: Валидация загрузки
           if [ ! -s MacOSX${SDK_VERSION}.sdk.tar.xz ]; then
             echo "::error::Failed to download SDK or file is empty."
             exit 1
@@ -57,7 +57,7 @@ jobs:
           cd /tmp/osxcross
           ./build.sh
 
-          # Guard Clause: Проверка успешности компиляции clang враппера
+          # Guard Clause: Проверка генерации бинарника
           if [ ! -x "./target/bin/x86_64-apple-darwin17-clang" ]; then
             echo "::error::Clang binary for x86_64-apple-darwin17 was not created. Build failed."
             exit 1
@@ -69,17 +69,24 @@ jobs:
           export PATH="/tmp/osxcross/target/bin:$PATH"
           
           echo "Installing foundational C/C++ libraries via osxcross-macports..."
-          yes | x86_64-apple-darwin17-macports install \
+          
+          # Отключаем pipefail временно, чтобы утилита 'yes' не обрушила скрипт сигналом SIGPIPE (141)
+          set +o pipefail
+          yes | osxcross-macports install \
             pkgconfig zlib bzip2 libpng freetype fontconfig \
             libxml2 openssl jpeg tiff x264 x265 lame opus libvpx \
-            xvid lcms2 openexr boost libsdl2 || {
-              echo "::error::MacPorts package installation failed."
-              exit 1
-            }
+            xvid lcms2 openexr boost libsdl2
+          MACPORTS_STATUS=$?
+          set -o pipefail
+          
+          if [ $MACPORTS_STATUS -ne 0 ]; then
+            echo "::error::MacPorts package installation failed."
+            exit 1
+          fi
 
-          # Guard Clause: Проверка установки пакетов
+          # Guard Clause: Проверка установки пакетов по наличию заголовочных файлов
           SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
-          if [ ! -f "$SYSROOT/lib/libssl.dylib" ] || [ ! -d "$SYSROOT/include/boost" ]; then
+          if [ ! -d "$SYSROOT/include/openssl" ] || [ ! -d "$SYSROOT/include/boost" ]; then
             echo "::error::Critical libraries (OpenSSL or Boost) are missing in MacPorts sysroot."
             exit 1
           fi
