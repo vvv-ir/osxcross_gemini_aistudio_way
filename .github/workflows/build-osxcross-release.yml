@@ -40,7 +40,7 @@ jobs:
           echo "Downloading macOS ${SDK_VERSION} SDK from phracker mirror..."
           curl -fL -o MacOSX${SDK_VERSION}.sdk.tar.xz "${SDK_URL}"
           
-          # Guard Clause: Валидация загрузки
+          # Guard Clause: Валидация загрузки (с пробелами по POSIX)
           if[ ! -s MacOSX${SDK_VERSION}.sdk.tar.xz ]; then
             echo "::error::Failed to download SDK or file is empty."
             exit 1
@@ -79,7 +79,7 @@ jobs:
 
           # Guard Clause: Проверка установки пакетов
           SYSROOT="/tmp/osxcross/target/macports/pkgs/opt/local"
-          if[ ! -f "$SYSROOT/lib/libssl.dylib" ] || [ ! -d "$SYSROOT/include/boost" ]; then
+          if[ ! -f "$SYSROOT/lib/libssl.dylib" ] ||[ ! -d "$SYSROOT/include/boost" ]; then
             echo "::error::Critical libraries (OpenSSL or Boost) are missing in MacPorts sysroot."
             exit 1
           fi
@@ -104,7 +104,6 @@ jobs:
       - name: Create GitHub Release and Upload
         uses: softprops/action-gh-release@v2
         with:
-          # Автоматическая генерация тега (например, 10.13-build-42)
           tag_name: "10.13-build-${{ github.run_number }}"
           name: "OSXCross High Sierra (10.13) Base Libs (Build ${{ github.run_number }})"
           body: |
