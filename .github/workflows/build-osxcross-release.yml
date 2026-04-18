@@ -1,4 +1,4 @@
-name: Build OSXCross (macOS 10.13 High Sierra) Base Libs
+name: Build Multi-OSXCross Toolchains
 
 on:
   workflow_dispatch:
@@ -7,61 +7,69 @@ permissions:
   contents: write
 
 jobs:
-  build-and-package:
+  build-toolchain:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - osx: "10.5"
+            sdk: "10.5"
+            url: "https://github.com/phracker/MacOSX-SDKs/releases/download/MacOSX10.5.sdk/MacOSX10.5.sdk.tar.xz"
+            sha: "9312384a60f994793f41249b809a47d25e0e118991218df8ba5f0709f6e52c8b"
+          - osx: "10.6"
+            sdk: "10.6"
+            url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.6/MacOSX10.6.sdk.tar.xz"
+            sha: "f1a1824707255476d05f324317f23c72b7f00a5d62557e056d0a7a030c50d30c"
+          - osx: "10.13"
+            sdk: "10.13"
+            url: "https://github.com/joseluisq/macosx-sdks/releases/download/10.13/MacOSX10.13.sdk.tar.xz"
+            sha: "9d3eddc34a510198694f5ec7cfbdebaee4c0c7ba68ad1d957cb566649c9a0f84"
+
     env:
-      OSX_VERSION_MIN: "10.13"
-      SDK_VERSION: "10.13"
-      SDK_URL: "https://github.com/joseluisq/macosx-sdks/releases/download/10.13/MacOSX10.13.sdk.tar.xz"
-      SDK_SHA256: "9d3eddc34a510198694f5ec7cfbdebaee4c0c7ba68ad1d957cb566649c9a0f84"
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.osx }}
       UNATTENDED: "1"
-      MACOSX_DEPLOYMENT_TARGET: "10.13"
 
     steps:
-      - name: Install System Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev patch make tar xz-utils bzip2 pbzip2 curl git
+      - name: Install Deps
+        run: sudo apt-get update && sudo apt-get install -y clang cmake llvm-dev uuid-dev libssl-dev libxml2-dev patch make tar xz-utils bzip2 pbzip2 curl git
 
-      - name: Prepare OSXCross and SDK
+      - name: Build
         run: |
-          # 1. Клонирование
           git clone https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
-          
-          # 2. Скачивание SDK ДО билда
           mkdir -p /tmp/osxcross/tarballs
-          curl -fL -o /tmp/osxcross/tarballs/MacOSX${SDK_VERSION}.sdk.tar.xz "${SDK_URL}"
+          curl -fL -o /tmp/osxcross/tarballs/MacOSX${{ matrix.sdk }}.sdk.tar.xz "${{ matrix.url }}"
+          echo "${{ matrix.sha }}  /tmp/osxcross/tarballs/MacOSX${{ matrix.sdk }}.sdk.tar.xz" | sha256sum --check -
+          cd /tmp/osxcross && ./build.sh
           
-          # 3. Валидация SDK
-          echo "${SDK_SHA256}  /tmp/osxcross/tarballs/MacOSX${SDK_VERSION}.sdk.tar.xz" | sha256sum --check -
-
-      - name: Build OSXCross Toolchain
-        run: |
-          cd /tmp/osxcross
-          # UNATTENDED=1 обеспечивает автоматическую распаковку SDK из tarballs/
-          ./build.sh
-
-      - name: Populate Dependencies
-        run: |
+          # Populating
           export PATH="/tmp/osxcross/target/bin:$PATH"
-          cd /tmp/osxcross
-          
           PKGS="pkgconfig zlib bzip2 libpng freetype fontconfig libxml2 openssl jpeg tiff x264 x265 lame libvpx xvid lcms2 openexr boost libsdl2 opus"
+          for pkg in $PKGS; do osxcross-macports install "$pkg" || osxcross-macports fake-install "$pkg" || true; done
           
-          for pkg in $PKGS; do
-            echo "Processing $pkg..."
-            # osxcross-macports умеет докачивать зависимости сам
-            osxcross-macports install "$pkg" || osxcross-macports fake-install "$pkg"
-          done
+          # Packaging
+          rm -rf /tmp/osxcross/target/macports/software/*
+          tar -I pbzip2 -cf /tmp/osxcross-${{ matrix.osx }}-toolchain.tar.bz2 -C /tmp/osxcross target/
 
-      - name: Sanitize and Compress
-        run: |
-          cd /tmp/osxcross
-          rm -rf target/macports/software/*
-          tar -I pbzip2 -cf /tmp/osxcross-10.13-toolchain.tar.bz2 target/
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-${{ matrix.osx }}
+          path: /tmp/osxcross-${{ matrix.osx }}-toolchain.tar.bz2
+
+  release:
+    needs: build-toolchain
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "10.13-build-${{ github.run_number }}"
-          files: /tmp/osxcross-10.13-toolchain.tar.bz2
+          tag_name: "multi-build-${{ github.run_number }}"
+          files: ./artifacts/*/*.tar.bz2
